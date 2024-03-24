@@ -174,55 +174,39 @@ static void parse_desktop_files(void)
     filp_close(app_dir, NULL);
 }
 
-unsigned long calculate_memory_usage(struct task_struct *task)
-{
-    struct task_struct *child;
-    unsigned long total_memory = 0;
-    struct mm_struct *mm;
-
-    // Get memory usage of current process
-    mm = get_task_mm(task);
-    if (mm != NULL)
-    {
-        total_memory += get_mm_rss(mm) << (PAGE_SHIFT - 10); // Convert bytes to kb
-        mmput(mm);
-    }
-
-    // Iterate over each child process
-    list_for_each_entry(child, &task->children, sibling)
-    {
-        total_memory += calculate_memory_usage(child);
-    }
-
-    return total_memory;
-}
-
 void update_time(struct timer_list *timer)
 {
     // struct task_struct *task;
 
     struct task_struct *task;
+    struct mm_struct *mm;
 
     // Initialize memory utilization array
     unsigned long memory_usage[MAX_ENTRIES] = {0};
+    unsigned long total_memory;
 
-    printk("----------------------Updating times of applications---------------------------------");
+    printk("-------------------------Updating times of applications---------------------------------");
     for_each_process(task)
     {
+        mm = get_task_mm(task);
+        total_memory = 0;
+        if (mm != NULL)
+        {
+            // Calculate memory utilization in bytes
+            total_memory = get_mm_rss(mm) << (PAGE_SHIFT - 10);
+            mmput(mm);
+        }
 
         for (int i = 0; i < commands_size; i++)
         {
-            if (strcmp(task->comm, commands[i]) == 0 && update[i] == 0)
-            {
-                running_time_ms[i] += INTERVAL;
-                update[i] = 1;
-                printk("%s\n", task->comm);
-            }
-
             if (strcmp(task->comm, commands[i]) == 0)
             {
-
-                memory_usage[i] += calculate_memory_usage(task);
+                if(update[i] == 0) {
+                    running_time_ms[i] += INTERVAL;
+                    update[i] = 1;
+                    printk("%s\n", commands[i]);
+                }
+                memory_usage[i] += total_memory;
             }
         }
     }
@@ -239,25 +223,6 @@ void update_time(struct timer_list *timer)
 static ssize_t read_proc(struct file *filp, char __user *buffer, size_t length, loff_t *offset)
 {
     unsigned long seconds, minutes, hours;
-    /*
-    printk(KERN_INFO "-------------------------------___APP INFO -----------------------------------------");
-    printk(KERN_INFO "Process Name\tRunning Time (hh:mm:ss)");
-
-    for (int i = 0; i < commands_size; ++i) {
-        if(running_time_ms[i] == 0)
-                continue;
-        // Convert milliseconds to hours, minutes, and seconds
-        seconds = running_time_ms[i] / 1000;
-
-        minutes = seconds / 60;
-        hours = minutes / 60;
-        seconds %= 60;
-        minutes %= 60;
-
-        printk(KERN_INFO "%-30s\t%02lu:%02lu:%02lu\t\n", commands[i], hours, minutes, seconds);
-    }
-    */
-
     int len = 0;
     char buf[BUFFERSIZE];
     char *running;
@@ -285,8 +250,8 @@ static ssize_t read_proc(struct file *filp, char __user *buffer, size_t length, 
         }
     }
 
-    len += sprintf(buf + len, "------------------------------- APPLICATION USAGE -----------------------------------------\n\n");
-    len += sprintf(buf + len, "%-40s\tTIME (hh:mm:ss)\t\tIS_RUNNING\t\t Memory(KB)\n\n", "APPLICATION");
+    len += sprintf(buf + len, "---------------------------------- APPLICATION USAGE ---------------------------------------------\n\n");
+    len += sprintf(buf + len, "%-40s\tTIME (hh:mm:ss)\t\tIS_RUNNING\t\t MEMORY(KB)\n\n", "APPLICATION");
 
     for (int i = 0; i < commands_size; ++i)
     {
@@ -301,7 +266,7 @@ static ssize_t read_proc(struct file *filp, char __user *buffer, size_t length, 
         minutes %= 60;
 
         running = (is_running[arr[i]] ? "Yes" : " No");
-        len += sprintf(buf + len, "%-40s\t%02lu:%02lu:%02lu\t\t%s\t\t\t %lu kb\n", name[arr[i]], hours, minutes, seconds, running, mem_update[arr[i]]);
+        len += sprintf(buf + len, "%-40s\t%02lu:%02lu:%02lu\t\t%s\t\t\t %lu\n", name[arr[i]], hours, minutes, seconds, running, mem_update[arr[i]]);
     }
 
     if (copy_to_user(buffer, buf, len))
